@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     id("kotlin-kapt")
+    id("kotlin-parcelize")
 }
 
 android {
@@ -39,8 +40,18 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
-}
 
+    packaging {
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/DEPENDENCIES"
+            excludes += "/META-INF/LICENSE"
+            excludes += "/META-INF/LICENSE.txt"
+            excludes += "/META-INF/NOTICE"
+            excludes += "/META-INF/NOTICE.txt"
+        }
+    }
+}
 
 dependencies {
     // Jetpack Compose
@@ -62,15 +73,31 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 
-    // Retrofit
+    // Retrofit + OkHttp
     implementation("com.squareup.retrofit2:retrofit:2.9.0")
     implementation("com.squareup.retrofit2:converter-gson:2.9.0")
-    implementation("com.squareup.okhttp3:logging-interceptor:5.0.0-alpha.2")
+    implementation("com.squareup.okhttp3:okhttp:5.0.0-alpha.14")
+    implementation("com.squareup.okhttp3:logging-interceptor:5.0.0-alpha.14")
 
     // Room
     implementation("androidx.room:room-runtime:2.6.1")
     kapt("androidx.room:room-compiler:2.6.1")
     implementation("androidx.room:room-ktx:2.6.1")
+
+    // Navigation
+    implementation("androidx.navigation:navigation-compose:2.7.7")
+
+    // Material Icons Extended
+    implementation("androidx.compose.material:material-icons-extended")
+
+    // ViewModel Compose
+    implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+
+    // Coroutines
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // OpenCSV
+    implementation("com.opencsv:opencsv:5.5.2")
 
     // MPAndroidChart
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
@@ -78,21 +105,4 @@ dependencies {
     // Glide
     implementation("com.github.bumptech.glide:glide:4.13.2")
     kapt("com.github.bumptech.glide:compiler:4.13.2")
-
-    // Material 3
-    implementation("androidx.compose.material3:material3:1.1.2")
-
-    implementation("androidx.navigation:navigation-compose:2.7.7")
-
-    // other dependencies...
-    implementation("androidx.compose.material3:material3:1.2.1")
-    implementation("androidx.activity:activity-compose:1.8.2")
-    implementation ("androidx.compose.material:material-icons-extended")
-
-    implementation("com.google.accompanist:accompanist-swiperefresh:0.31.5-beta")
-    implementation("com.valentinilk.shimmer:compose-shimmer:1.0.5")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1")
-
-    // OpenCSV
-    implementation("com.opencsv:opencsv:5.5.2")
 }
