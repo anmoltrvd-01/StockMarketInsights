@@ -5,19 +5,18 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.example.stockmarketinsights.data.local.CompanyListingEntity
-import com.example.stockmarketinsights.data.local.WatchlistDao
 
 @Database(
     entities = [
         WatchlistEntity::class,
+        WatchlistStockEntity::class,
         StockEntity::class,
-        CompanyListingEntity::class   // ← added
+        CompanyListingEntity::class
     ],
-    version = 3,                       // ← bumped from 2
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
-
     abstract fun watchlistDao(): WatchlistDao
     abstract fun stockDao(): StockDao
 
@@ -27,15 +26,14 @@ abstract class AppDatabase : RoomDatabase() {
 
         fun getDatabase(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
-                val instance = Room.databaseBuilder(
+                Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
-                    "stock_market_db"
+                    "stock_market_insights.db"
                 )
-                    .fallbackToDestructiveMigration() // safe during dev
+                    .fallbackToDestructiveMigration()
                     .build()
-                INSTANCE = instance
-                instance
+                    .also { INSTANCE = it }
             }
         }
     }
