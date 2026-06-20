@@ -8,151 +8,137 @@ import com.example.stockmarketinsights.data.csv.IntradayInfoParser
 import com.example.stockmarketinsights.data.mapper.toCompanyInfo
 import com.example.stockmarketinsights.data.mapper.toCompanyListing
 import com.example.stockmarketinsights.data.mapper.toCompanyListingEntity
-import com.example.stockmarketinsights.data.domain.model.StockSummaryItem
+import com.example.stockmarketinsights.dataModel.StockSummaryItem
+import com.example.stockmarketinsights.dataModel.SymbolSearchResponse
+import com.example.stockmarketinsights.dataModel.TopGainersLosersResponse
 import com.example.stockmarketinsights.domain.model.CompanyInfo
 import com.example.stockmarketinsights.domain.model.CompanyListing
 import com.example.stockmarketinsights.domain.model.IntradayInfo
-import com.example.stockmarketinsights.network.AlphaVantageApiService
 import com.example.stockmarketinsights.network.RetrofitInstance
 import com.example.stockmarketinsights.roomdb.AppDatabase
-import com.example.stockmarketinsights.utils.ApiRateLimiter
-import com.example.stockmarketinsights.utils.NetworkUtils
+import com.example.stockmarketinsights.roomdb.StockEntity
 import com.example.stockmarketinsights.utils.Resource
-import com.example.stockmarketinsights.utils.toEntity
-import com.example.stockmarketinsights.utils.toStockSummaryItem
-import com.example.stockmarketinsights.utils.toUi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
-import retrofit2.HttpException
-import java.io.IOException
 
 class StockRepository(
     private val context: Context,
-    private val api: AlphaVantageApiService = RetrofitInstance.api,
     private val db: AppDatabase,
     private val companyListingsParser: CSVParser<CompanyListing> = CompanyListingsParser(),
-    private val intradayInfoParser: CSVParser<IntradayInfo>      = IntradayInfoParser()
+    private val intradayInfoParser: CSVParser<IntradayInfo> = IntradayInfoParser()
 ) {
-
-    private val stockDao = db.stockDao()
+    private val api      = RetrofitInstance.api
     private val apiKey   = BuildConfig.ALPHA_VANTAGE_API_KEY
+    private val stockDao = db.stockDao()
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // EXISTING: Top gainers / losers (unchanged - used by ExploreScreen)
-    // ─────────────────────────────────────────────────────────────────────────
 
-    suspend fun getTopStocks(type: String): List<StockSummaryItem> {
-        if (!NetworkUtils.isConnected(context)) {
-            return stockDao.getAllStocks().map { it.toUi() }
+    suspend fun getTopGainersLosers(): Resource<TopGainersLosersResponse> {
+        return try {
+            Resource.Success(api.getTopGainersLosers(apiKey))
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Unknown error fetching top gainers/losers")
         }
-        if (!ApiRateLimiter.canCallApi()) {
-            return stockDao.getAllStocks().map { it.toUi() }
-        }
-        ApiRateLimiter.recordCall()
-
-        val response  = api.getTopGainersAndLosers(apiKey = apiKey)
-        val apiStocks = if (type.lowercase() == "gainers") response.top_gainers else response.top_losers
-        val uiStocks  = apiStocks.map { it.toStockSummaryItem() }
-
-        stockDao.insertStocks(uiStocks.map { it.toEntity() })
-        return uiStocks
     }
 
-    suspend fun getTopGainers() = getTopStocks("gainers")
-    suspend fun getTopLosers()  = getTopStocks("losers")
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // EXISTING: Symbol search (unchanged - used by SearchAllStocksScreen)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    suspend fun searchSymbol(query: String): List<StockSummaryItem> {
-        if (!NetworkUtils.isConnected(context)) {
-            return stockDao.searchStocks("%$query%").map { it.toUi() }
+    suspend fun getCachedStocks(type: String): List<StockSummaryItem> {
+        return stockDao.getStocksByType(type).map {
+            StockSummaryItem(
+                symbol        = it.symbol,
+                name          = it.name,
+                price         = it.price,
+                change        = it.change,
+                changePercent = it.changePercent,
+                volume        = it.volume
+            )
         }
-        if (!ApiRateLimiter.canCallApi()) return emptyList()
-        ApiRateLimiter.recordCall()
-        val response = api.searchSymbols(keywords = query, apiKey = apiKey)
-        return response.bestMatches.map { it.toStockSummaryItem() }
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // NEW: Company listings via CSV (used by ExploreScreen company listing feature)
-    // ─────────────────────────────────────────────────────────────────────────
+    suspend fun cacheStocks(stocks: List<StockSummaryItem>, type: String) {
+        val entities = stocks.map {
+            StockEntity(
+                symbol        = it.symbol,
+                name          = it.name,
+                price         = it.price,
+                change        = it.change,
+                changePercent = it.changePercent,
+                volume        = it.volume,
+                type          = type
+            )
+        }
+        stockDao.clearStocksByType(type)
+        stockDao.insertStocks(entities)
+    }
 
-    suspend fun getCompanyListings(
+
+    suspend fun searchSymbol(keywords: String): Resource<SymbolSearchResponse> {
+        return try {
+            Resource.Success(api.searchSymbol(keywords, apiKey))
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Search failed")
+        }
+    }
+
+    suspend fun getCompanyInfo(symbol: String): Resource<CompanyInfo> {
+        return try {
+            val dto = api.getCompanyInfo(symbol, apiKey)
+            if (dto.symbol.isNullOrBlank() && dto.name.isNullOrBlank()) {
+                return Resource.Error("No company info available for $symbol")
+            }
+            Resource.Success(dto.toCompanyInfo())
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Failed to load company info")
+        }
+    }
+
+
+    suspend fun getIntradayInfo(symbol: String): Resource<List<IntradayInfo>> {
+        return try {
+            val response = api.getIntradayInfo(symbol, apiKey)
+            val infos = intradayInfoParser.parse(response.byteStream())
+            if (infos.isEmpty()) {
+                Resource.Error("Chart data unavailable (API limit reached or no data for $symbol)")
+            } else {
+                Resource.Success(infos)
+            }
+        } catch (e: Exception) {
+            Resource.Error(e.message ?: "Failed to load chart data")
+        }
+    }
+
+    fun getCompanyListings(
         fetchFromRemote: Boolean,
         query: String
     ): Flow<Resource<List<CompanyListing>>> = flow {
-
         emit(Resource.Loading(true))
 
-        val localListings = stockDao.searchCompanyListing(query)
-        emit(Resource.Success(data = localListings.map { it.toCompanyListing() }))
+        val localListings = stockDao.searchCompanyListings(query)
+        val isDbEmpty = localListings.isEmpty() && query.isBlank()
 
-        val isDbEmpty             = localListings.isEmpty() && query.isBlank()
-        val shouldLoadFromCache   = !isDbEmpty && !fetchFromRemote
-        if (shouldLoadFromCache) {
-            emit(Resource.Loading(false))
-            return@flow
+        if (!isDbEmpty) {
+            emit(Resource.Success(localListings.map { it.toCompanyListing() }))
         }
 
-        if (!NetworkUtils.isConnected(context)) {
-            emit(Resource.Error("No internet connection"))
+        val shouldFetchRemote = isDbEmpty || fetchFromRemote
+        if (!shouldFetchRemote) {
             emit(Resource.Loading(false))
             return@flow
         }
 
         val remoteListings = try {
-            val response = api.getListings(apiKey = apiKey)
+            val response = api.getListings(apiKey)
             companyListingsParser.parse(response.byteStream())
-        } catch (e: IOException) {
-            emit(Resource.Error("Couldn't load listings: ${e.localizedMessage}"))
-            null
-        } catch (e: HttpException) {
-            emit(Resource.Error("Server error: ${e.localizedMessage}"))
+        } catch (e: Exception) {
+            emit(Resource.Error("Couldn't load listings: ${e.message}"))
             null
         }
 
         remoteListings?.let { listings ->
             stockDao.clearCompanyListings()
             stockDao.insertCompanyListings(listings.map { it.toCompanyListingEntity() })
-            emit(Resource.Success(
-                data = stockDao.searchCompanyListing("").map { it.toCompanyListing() }
-            ))
+            val refreshed = stockDao.searchCompanyListings(query)
+            emit(Resource.Success(refreshed.map { it.toCompanyListing() }))
         }
 
         emit(Resource.Loading(false))
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // NEW: Intraday chart data via CSV (used by DetailsScreen chart)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    suspend fun getIntradayInfo(symbol: String): Resource<List<IntradayInfo>> {
-        return try {
-            val response = api.getIntradayInfo(symbol = symbol, apiKey = apiKey)
-            val results  = intradayInfoParser.parse(response.byteStream())
-            Resource.Success(results)
-        } catch (e: IOException) {
-            Resource.Error("Couldn't load chart data: ${e.localizedMessage}")
-        } catch (e: HttpException) {
-            Resource.Error("Server error: ${e.localizedMessage}")
-        }
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // NEW: Real company overview (used by DetailsScreen description / info)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    suspend fun getCompanyInfo(symbol: String): Resource<CompanyInfo> {
-        return try {
-            val dto    = api.getCompanyInfo(symbol = symbol, apiKey = apiKey)
-            val result = dto.toCompanyInfo()
-            Resource.Success(result)
-        } catch (e: IOException) {
-            Resource.Error("Couldn't load company info: ${e.localizedMessage}")
-        } catch (e: HttpException) {
-            Resource.Error("Server error: ${e.localizedMessage}")
-        }
     }
 }
