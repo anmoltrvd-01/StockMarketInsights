@@ -93,9 +93,6 @@ dependencies {
     implementation("com.valentinilk.shimmer:compose-shimmer:1.0.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.1")
 
-
-
-
-
-
+    // OpenCSV
+    implementation("com.opencsv:opencsv:5.5.2")
 }

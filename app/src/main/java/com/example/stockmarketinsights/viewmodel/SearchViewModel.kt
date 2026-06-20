@@ -2,5 +2,6 @@ package com.example.stockmarketinsights.viewmodel
 
 import androidx.lifecycle.ViewModel
 
-class ExploreViewModel : ViewModel() {
+class SearchViewModel : ViewModel() {
+    // Debounced symbol search
 }

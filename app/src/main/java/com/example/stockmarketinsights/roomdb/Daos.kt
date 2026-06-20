@@ -1,4 +1,3 @@
 package com.example.stockmarketinsights.roomdb
 
-class WatchlistRepository {
-}
+// WatchlistDao + StockDao
