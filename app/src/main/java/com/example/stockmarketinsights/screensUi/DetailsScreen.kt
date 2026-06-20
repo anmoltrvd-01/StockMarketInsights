@@ -1,54 +1,30 @@
 package com.example.stockmarketinsights.screensUi
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Bookmark
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.BookmarkAdd
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.example.stockmarketinsights.componentsUi.StockChart
 import com.example.stockmarketinsights.dataModel.StockSummaryItem
 import com.example.stockmarketinsights.dialogsUi.AddToWatchlistDialog
-import com.example.stockmarketinsights.repository.StockRepository
 import com.example.stockmarketinsights.roomdb.AppDatabase
-import com.example.stockmarketinsights.roomdb.WatchlistRepository
-import com.example.stockmarketinsights.viewmodel.StockDetailsViewModelFactory
+import com.example.stockmarketinsights.ui.theme.GreenPrimary
+import com.example.stockmarketinsights.ui.theme.RedAccent
+import com.example.stockmarketinsights.ui.theme.SurfaceDark
 import com.example.stockmarketinsights.viewmodel.StockDetailsViewModel
+import com.example.stockmarketinsights.viewmodel.StockDetailsViewModelFactory
 import com.example.stockmarketinsights.viewmodel.WatchlistViewModel
 import com.example.stockmarketinsights.viewmodel.WatchlistViewModelFactory
 
@@ -56,51 +32,41 @@ import com.example.stockmarketinsights.viewmodel.WatchlistViewModelFactory
 @Composable
 fun DetailsScreen(
     stock: StockSummaryItem,
-    navController: NavController
+    navController: NavController,
+    db: AppDatabase
 ) {
     val context = LocalContext.current
-    val db      = remember { AppDatabase.getDatabase(context) }
 
-    // ── Watchlist ViewModel (unchanged) ─────────────────────────────────────
-    val watchlistRepository = remember { WatchlistRepository(db.watchlistDao()) }
-    val watchlistViewModel: WatchlistViewModel =
-        viewModel(factory = WatchlistViewModelFactory(watchlistRepository))
-    val watchlistNames by watchlistViewModel.watchlistItems.collectAsState()
-
-    // ── Details ViewModel (new - real company info + chart) ─────────────────
-    val stockRepository = remember { StockRepository(context = context, db = db) }
     val detailsViewModel: StockDetailsViewModel = viewModel(
-        factory = StockDetailsViewModelFactory(stockRepository, stock.symbol),
-        key     = stock.symbol    // unique key per stock so VM reloads on navigate
+        key = "details_${stock.symbol}",
+        factory = StockDetailsViewModelFactory(context, db, stock.symbol)
     )
     val detailsState = detailsViewModel.state
 
-    var showDialog by remember { mutableStateOf(false) }
+    val watchlistViewModel: WatchlistViewModel = viewModel(
+        factory = WatchlistViewModelFactory(db)
+    )
 
-    if (showDialog) {
-        AddToWatchlistDialog(
-            showDialog         = true,
-            existingWatchlists = watchlistNames.map { it.watchlistName }.distinct(),
-            onDismiss          = { showDialog = false },
-            onAdd              = { watchlistName ->
-                watchlistViewModel.addStockToWatchlist(watchlistName, stock)
-                showDialog = false
-            }
-        )
-    }
+    var showWatchlistDialog by remember { mutableStateOf(false) }
+
+    val isPositive = !stock.change.startsWith("-")
+    val changeColor = if (isPositive) GreenPrimary else RedAccent
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Stock Detail") },
+                title = { Text(stock.symbol, fontWeight = FontWeight.Bold) },
                 navigationIcon = {
                     IconButton(onClick = { navController.popBackStack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = { showDialog = true }) {
-                        Icon(Icons.Default.Bookmark, contentDescription = "Bookmark")
+                    IconButton(onClick = {
+                        watchlistViewModel.loadWatchlists()
+                        showWatchlistDialog = true
+                    }) {
+                        Icon(Icons.Filled.BookmarkAdd, contentDescription = "Add to watchlist")
                     }
                 }
             )
@@ -110,78 +76,56 @@ fun DetailsScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
-                .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-
-            // ── Stock header (your original UI) ───────────────────────────
-            Row(
-                verticalAlignment    = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier             = Modifier.fillMaxWidth()
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.surfaceVariant)
-                    ) {
-                        Text(
-                            text     = stock.symbol.take(2),
-                            modifier = Modifier.align(Alignment.Center),
-                            style    = MaterialTheme.typography.labelLarge
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(stock.name, style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "${stock.symbol} · Common Stock",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                    }
-                }
-
-                Column(horizontalAlignment = Alignment.End) {
-                    val isPositive = !stock.changePercent.contains("-")
-                    val color      = if (isPositive) Color(0xFF27AE60) else Color(0xFFC0392B)
-                    Text(text = stock.price,         color = color)
-                    Text(text = stock.changePercent, color = color)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ── Chart section ─────────────────────────────────────────────
-            Text("Today's Chart", style = MaterialTheme.typography.titleSmall)
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Box(
+            // Stock header
+            Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+                    .padding(16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark)
             ) {
-                when {
-                    detailsState.isLoading -> {
-                        CircularProgressIndicator()
-                    }
-                    detailsState.intradayInfos.isNotEmpty() -> {
-                        StockChart(
-                            infos    = detailsState.intradayInfos,
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(8.dp),
-                            graphColor = if (!stock.changePercent.contains("-"))
-                                Color(0xFF27AE60) else Color(0xFFC0392B)
-                        )
-                    }
-                    else -> {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Text(
+                        text = detailsState.companyInfo?.name?.ifBlank { stock.name } ?: stock.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = stock.symbol,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
                         Text(
-                            "Chart unavailable",
+                            text = if (stock.price.isNotBlank() && stock.price != "N/A") "$${stock.price}" else "N/A",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                text = if (isPositive) "+${stock.change}" else stock.change,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = changeColor,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = stock.changePercent,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = changeColor
+                            )
+                        }
+                    }
+                    if (stock.volume != "N/A" && stock.volume.isNotBlank()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Vol: ${stock.volume}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -189,70 +133,173 @@ fun DetailsScreen(
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // ── Company info section ──────────────────────────────────────
-            detailsState.companyInfo?.let { info ->
-                if (info.industry.isNotBlank()) {
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        InfoChip(label = "Industry", value = info.industry)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        if (info.country.isNotBlank()) {
-                            InfoChip(label = "Country", value = info.country)
-                        }
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
-                }
-
-                Text(
-                    text  = "About ${info.name.ifBlank { stock.name }}",
-                    style = MaterialTheme.typography.titleSmall
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text  = info.description.ifBlank { "No description available." },
-                    style = MaterialTheme.typography.bodySmall
-                )
-            } ?: run {
-                if (!detailsState.isLoading) {
+            // Chart section
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        text  = "About ${stock.name}",
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text  = "Company details unavailable.",
-                        style = MaterialTheme.typography.bodySmall,
+                        text = "Intraday (1h)",
+                        style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    when {
+                        detailsState.isLoading -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(color = GreenPrimary)
+                            }
+                        }
+                        detailsState.intradayInfos.isNotEmpty() -> {
+                            StockChart(
+                                infos = detailsState.intradayInfos,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(200.dp),
+                                graphColor = changeColor
+                            )
+                        }
+                        else -> {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = detailsState.chartError
+                                        ?: "Chart data unavailable",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
-            // Error state (non-blocking - shown below content)
-            detailsState.error?.let { err ->
-                Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Company info section
+            if (detailsState.isLoading) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(100.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(color = GreenPrimary, modifier = Modifier.size(24.dp))
+                }
+            } else if (detailsState.companyInfo != null) {
+                val info = detailsState.companyInfo
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = SurfaceDark)
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Text(
+                            text = "About",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        if (!info?.industry.isNullOrBlank()) {
+                            InfoRow(label = "Industry", value = info!!.industry)
+                        }
+                        if (!info?.country.isNullOrBlank()) {
+                            InfoRow(label = "Country", value = info!!.country)
+                        }
+                        if (!info?.description.isNullOrBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = info!!.description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else if (detailsState.error != null) {
                 Text(
-                    text  = err,
+                    text = detailsState.error ?: "",
+                    modifier = Modifier.padding(16.dp),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.error
                 )
             }
+
+            Spacer(modifier = Modifier.height(24.dp))
         }
+    }
+
+    // Watchlist dialog
+    if (showWatchlistDialog) {
+        AddToWatchlistDialog(
+            symbol = stock.symbol,
+            stockName = stock.name,
+            watchlists = watchlistViewModel.watchlists,
+            onDismiss = { showWatchlistDialog = false },
+            onAddToWatchlist = { watchlistName ->
+                watchlistViewModel.addStockToWatchlist(
+                    watchlistName = watchlistName,
+                    symbol = stock.symbol,
+                    stockName = stock.name,
+                    price = stock.price,
+                    change = stock.change,
+                    changePercent = stock.changePercent
+                )
+                showWatchlistDialog = false
+            },
+            onCreateNew = { newName ->
+                watchlistViewModel.createWatchlist(newName) {
+                    watchlistViewModel.addStockToWatchlist(
+                        watchlistName = newName,
+                        symbol = stock.symbol,
+                        stockName = stock.name,
+                        price = stock.price,
+                        change = stock.change,
+                        changePercent = stock.changePercent
+                    )
+                }
+                showWatchlistDialog = false
+            }
+        )
     }
 }
 
 @Composable
-private fun InfoChip(label: String, value: String) {
-    Box(
+private fun InfoRow(label: String, value: String) {
+    Row(
         modifier = Modifier
-            .clip(RoundedCornerShape(20.dp))
-            .background(MaterialTheme.colorScheme.secondaryContainer)
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
     ) {
         Text(
-            text  = "$label: $value",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSecondaryContainer
+            text = "$label: ",
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }
